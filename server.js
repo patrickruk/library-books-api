@@ -1,6 +1,10 @@
 require('dotenv').config();
 const express = require('express');
 const pool = require('./db');
+const jwt = require('jsonwebtoken');
+const authMiddleware = require('./authMiddleware');
+const bcrypt = require('bcrypt');
+const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.use(express.json());
@@ -31,8 +35,11 @@ app.get('/api/books', async (req, res) => {
     }
 });
 
-app.post('/api/books', async (req, res) => {
+app.post('/api/books', authMiddleware, async (req, res) => {
     try {
+        if (!req.body) {
+    return res.status(400).json({ error: 'Request body is required' });
+}
         const { title, published_year, author_id } = req.body;
 
         if (!title || title.trim() === '') {
@@ -54,7 +61,7 @@ app.post('/api/books', async (req, res) => {
     }
 });
 
-app.put('/api/books/:id', async (req, res) => {
+app.put('/api/books/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const { title, published_year, author_id } = req.body;
@@ -85,7 +92,7 @@ app.put('/api/books/:id', async (req, res) => {
 });
 
 
-app.delete('/api/books/:id', async (req, res) => {
+app.delete('/api/books/:id', authMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -109,7 +116,85 @@ app.delete('/api/books/:id', async (req, res) => {
 
 
 
-const PORT = process.env.PORT || 3000;
+app.post('/api/register', async (req, res) => {
+    try {
+        if (!req.body) {
+    return res.status(400).json({ error: 'Request body is required' });
+}
+        const { username, password } = req.body;
+
+        if (!username || username.trim() === '') {
+            return res.status(400).json({ error: 'Username is required' });
+        }
+        if (!password || password.trim() === '') {
+            return res.status(400).json({ error: 'Password is required' });
+        }
+        
+        if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+}
+        const saltRounds = 10;
+        const passwordHash = await bcrypt.hash(password, saltRounds);
+
+        const query = `
+            INSERT INTO users (username, password_hash)
+            VALUES ($1, $2)
+            RETURNING id, username
+        `;
+        const values = [username, passwordHash];
+
+        const result = await pool.query(query, values);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        if (err.code === '23505') {
+            return res.status(409).json({ error: 'Username already taken' });
+        }
+        res.status(500).json({ error: 'Failed to register user' });
+    }
+});
+
+
+app.post('/api/login', async (req, res) => {
+
+    try {
+        if (!req.body) {
+    return res.status(400).json({ error: 'Request body is required' });
+}
+        const { username, password } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password are required' });
+        }
+
+        const query = 'SELECT * FROM users WHERE username = $1';
+        const result = await pool.query(query, [username]);
+
+        if (result.rows.length === 0) {
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+
+        const user = result.rows[0];
+        const passwordMatches = await bcrypt.compare(password, user.password_hash);
+
+        if (!passwordMatches) {
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+
+        const token = jwt.sign(
+            { userId: user.id, username: user.username },
+            process.env.JWT_SECRET,
+            { expiresIn: '1h' }
+        );
+
+        res.status(200).json({ message: 'Login successful', token });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Login failed' });
+    }
+});
+
+
 app.listen(PORT, () => {
     console.log(`Server running on http://127.0.0.1:${PORT}`);
 });

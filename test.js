@@ -1,6 +1,6 @@
 const http = require('http');
 
-function makeRequest(method, path, body = null) {
+function makeRequest(method, path, body = null, extraHeaders = {}) {
     return new Promise((resolve, reject) => {
         const data = body ? JSON.stringify(body) : null;
 
@@ -10,17 +10,18 @@ function makeRequest(method, path, body = null) {
             path: path,
             method: method,
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                ...extraHeaders
             }
         };
 
         const req = http.request(options, (res) => {
             let responseData = '';
             res.on('data', (chunk) => { responseData += chunk; });
-           res.on('end', () => {
-    const parsedBody = responseData ? JSON.parse(responseData) : null;
-    resolve({ statusCode: res.statusCode, body: parsedBody });
-});
+            res.on('end', () => {
+                const parsedBody = responseData ? JSON.parse(responseData) : null;
+                resolve({ statusCode: res.statusCode, body: parsedBody });
+            });
         });
 
         req.on('error', (err) => reject(err));
@@ -31,30 +32,37 @@ function makeRequest(method, path, body = null) {
         req.end();
     });
 }
+
 async function runTests() {
-    // Step 1: Create a book specifically to delete
-    const created = await makeRequest('POST', '/api/books', {
-        title: 'Temporary Book For Delete Test',
+    // 1. No token — blocked
+    const noTokenResult = await makeRequest('POST', '/api/books', {
+        title: 'Unauthorized Book',
         published_year: 2020,
         author_id: 1
     });
-    console.log('Created book:', created.statusCode, created.body);
+    console.log('POST /api/books (no token):', noTokenResult.statusCode, noTokenResult.body);
 
-    const idToDelete = created.body.id;
+    // 2. Log in
+    const loginResult = await makeRequest('POST', '/api/login', {
+        username: 'patrickruk',
+        password: 'securePass123'
+    });
+    const realToken = loginResult.body.token;
 
-    // Step 2: Delete it — should succeed
-    const deleteResult1 = await makeRequest('DELETE', `/api/books/${idToDelete}`);
-    console.log(`DELETE /api/books/${idToDelete} (first time):`, deleteResult1.statusCode);
+    // 3. Create a book WITH the valid token
+    const withTokenResult = await makeRequest('POST', '/api/books',
+        { title: 'Authorized Book', published_year: 2021, author_id: 1 },
+        { Authorization: `Bearer ${realToken}` }
+    );
+    console.log('POST /api/books (valid token):', withTokenResult.statusCode, withTokenResult.body);
 
-    // Step 3: Delete it again — should now be 404
-    const deleteResult2 = await makeRequest('DELETE', `/api/books/${idToDelete}`);
-    console.log(`DELETE /api/books/${idToDelete} (second time):`, deleteResult2.statusCode, deleteResult2.body);
-
-    const booksResult = await makeRequest('GET', '/api/books');
-console.log('GET /api/books:', booksResult.statusCode, booksResult.body);
+// 4. Try with a fake/tampered token
+const fakeTokenResult = await makeRequest('POST', '/api/books',
+    { title: 'Fake Token Book', published_year: 2022, author_id: 1 },
+    { Authorization: 'Bearer this.is.not.a.real.token' }
+);
+console.log('POST /api/books (fake token):', fakeTokenResult.statusCode, fakeTokenResult.body);
 
 }
 
 runTests();
-
-
