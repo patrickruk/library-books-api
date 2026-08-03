@@ -18,6 +18,13 @@ CREATE TABLE books (
     author_id INT REFERENCES authors(id)
 );
 
+CREATE TABLE refresh_tokens (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
 -- Sample data
 INSERT INTO authors (name, country) VALUES ('Chinua Achebe', 'Nigeria');
 INSERT INTO authors (name, country) VALUES ('Ngugi wa Thiong''o', 'Kenya');
